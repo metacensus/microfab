@@ -6,38 +6,25 @@ package protoutil
 
 import (
 	"crypto/sha256"
-	"time"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/golang/protobuf/ptypes/timestamp"
 	"github.com/hyperledger-labs/microfab/internal/pkg/identity"
 	"github.com/hyperledger-labs/microfab/internal/pkg/organization"
 	"github.com/hyperledger-labs/microfab/internal/pkg/txid"
 	"github.com/hyperledger-labs/microfab/internal/pkg/util"
 	"github.com/hyperledger/fabric-protos-go/common"
 	"github.com/hyperledger/fabric-protos-go/msp"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
-
-// GenerateTimestamp generates a new timestamp with the current time.
-func GenerateTimestamp() *timestamp.Timestamp {
-	now := time.Now()
-	seconds := now.Unix()
-	nanos := int32(now.UnixNano() - (seconds * 1000000000))
-	return &timestamp.Timestamp{
-		Seconds: seconds,
-		Nanos:   nanos,
-	}
-}
 
 // BuildChannelHeader builds a channel header for the specified channel and transaction ID.
 func BuildChannelHeader(headerType common.HeaderType, channel string, txID *txid.TransactionID) *common.ChannelHeader {
-	timestamp := GenerateTimestamp()
 	return &common.ChannelHeader{
 		Type:        int32(headerType),
 		Version:     1,
 		ChannelId:   channel,
 		TxId:        txID.String(),
-		Timestamp:   timestamp,
+		Timestamp:   timestamppb.Now(),
 		TlsCertHash: txID.Identity().Certificate().Hash(),
 	}
 }

@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
-	"math/rand"
 	"os"
 	"os/signal"
 	"path"
@@ -22,7 +21,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/hyperledger-labs/microfab/internal/pkg/blocks"
 	"github.com/hyperledger-labs/microfab/internal/pkg/ca"
 	"github.com/hyperledger-labs/microfab/internal/pkg/channel"
 	"github.com/hyperledger-labs/microfab/internal/pkg/console"
@@ -48,6 +46,9 @@ const endPort = 3000
 
 const gossipPortStart = 4000
 
+// stateFormat changes whenever a data directory written by an earlier Microfab cannot be reused.
+const stateFormat = "channel participation"
+
 // Microfab represents an instance of the Microfab application.
 type Microfab struct {
 	sync.Mutex
@@ -71,6 +72,7 @@ type Microfab struct {
 	currentPort            int
 	currentGossipPort      int
 	tls                    *identity.Identity
+	clusterTLS             *identity.Identity
 }
 
 // State represents the state that should be persisted between instances.
@@ -109,18 +111,16 @@ func (m *Microfab) Start() error {
 		}
 	}()
 
-	// Calculate the config hash.
-	config, err := json.Marshal(m.config)
+	hash, err := m.stateHash()
 	if err != nil {
 		return err
 	}
-	hash := sha256.Sum256(config)
 
 	// See if the state exists.
 	if m.stateExists() {
 		if temp, err := m.loadState(); err != nil {
 			logger.Printf("Could not load state: %v\n", err)
-		} else if bytes.Equal(hash[:], temp.Hash) {
+		} else if bytes.Equal(hash, temp.Hash) {
 			logger.Println("Loaded state")
 			m.state = temp
 		} else {
@@ -136,11 +136,11 @@ func (m *Microfab) Start() error {
 		}
 	}
 
-	// If TLS is enabled, generate the TLS material.
+	if err := m.createTLS(); err != nil {
+		return err
+	}
 	if m.config.TLS.Enabled {
-		if err := m.createTLS(); err != nil {
-			return err
-		}
+		m.tls = m.clusterTLS
 	}
 
 	// Create all of the organizations.
@@ -176,30 +176,31 @@ func (m *Microfab) Start() error {
 		}
 	}
 
-	// Create and start all of the components (orderer, peers, CAs).
-	eg.Go(func() error {
-		apiPort := m.allocatePort()
-		operationsPort := m.allocatePort()
-		return m.createAndStartOrderer(m.ordererOrganization, apiPort, operationsPort)
-	})
+	if err := m.createOrderer(); err != nil {
+		return err
+	}
+	eg.Go(m.startOrderer)
+	// Ports are allocated here, not in the goroutines: channel configs in a reused data directory hold them.
 	for i := range m.endorsingOrganizations {
 		organization := m.endorsingOrganizations[i]
+		peerAPIPort := m.allocatePort()
+		peerChaincodePort := m.allocatePort()
+		peerOperationsPort := m.allocatePort()
+		peerGossipPort := m.allocateGossipPort()
+		couchDBProxyPort := 0
+		if m.config.CouchDB {
+			couchDBProxyPort = m.allocatePort()
+		}
 		eg.Go(func() error {
-			peerAPIPort := m.allocatePort()
-			peerChaincodePort := m.allocatePort()
-			peerOperationsPort := m.allocatePort()
-			peerGossipPort := m.allocateGossipPort()
 			if m.config.CouchDB {
-				couchDBProxyPort := m.allocatePort()
 				go m.createAndStartCouchDBProxy(organization, couchDBProxyPort)
-				return m.createAndStartPeer(organization, peerAPIPort, peerChaincodePort, peerOperationsPort, m.config.CouchDB, couchDBProxyPort, peerGossipPort)
 			}
-			return m.createAndStartPeer(organization, peerAPIPort, peerChaincodePort, peerOperationsPort, false, 0, peerGossipPort)
+			return m.createAndStartPeer(organization, peerAPIPort, peerChaincodePort, peerOperationsPort, m.config.CouchDB, couchDBProxyPort, peerGossipPort)
 		})
 		if m.config.CertificateAuthorities {
+			caAPIPort := m.allocatePort()
+			caOperationsPort := m.allocatePort()
 			eg.Go(func() error {
-				caAPIPort := m.allocatePort()
-				caOperationsPort := m.allocatePort()
 				return m.createAndStartCA(organization, caAPIPort, caOperationsPort)
 			})
 		}
@@ -239,9 +240,6 @@ func (m *Microfab) Start() error {
 		}
 	}()
 
-	// wait for the orderer to wakeup
-	time.Sleep(8 * time.Second)
-
 	// Create and join all of the channels.
 	if m.state == nil {
 		for i := range m.config.Channels {
@@ -251,6 +249,12 @@ func (m *Microfab) Start() error {
 			})
 		}
 		err = eg.Wait()
+		if err != nil {
+			return err
+		}
+	}
+	for _, channel := range m.config.Channels {
+		err = m.orderer.WaitForLeader(channel.Name, m.config.Timeout)
 		if err != nil {
 			return err
 		}
@@ -296,8 +300,6 @@ func (m *Microfab) Wait() {
 }
 
 func (m *Microfab) allocatePort() int {
-	m.Lock()
-	defer m.Unlock()
 	if m.currentPort >= endPort {
 		logger.Fatalf("Failed to allocate port, port range %d-%d exceeded", startPort, endPort)
 	}
@@ -307,11 +309,6 @@ func (m *Microfab) allocatePort() int {
 }
 
 func (m *Microfab) allocateGossipPort() int {
-	m.Lock()
-	defer m.Unlock()
-	// if m.currentGossipPort >= endPort {
-	// 	logger.Fatalf("Failed to allocate port, port range %d-%d exceeded", startPort, endPort)
-	// }
 	result := m.currentGossipPort
 	m.currentGossipPort++
 	return result
@@ -387,28 +384,34 @@ func (m *Microfab) loadState() (*State, error) {
 
 func (m *Microfab) saveState() error {
 	statePath := path.Join(m.config.Directory, "state.json")
-	file, err := os.OpenFile(statePath, os.O_CREATE|os.O_WRONLY, 0644)
+	file, err := os.OpenFile(statePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
-	config, err := json.Marshal(m.config)
+	hash, err := m.stateHash()
 	if err != nil {
 		return err
 	}
-	hash := sha256.Sum256(config)
 	state := &State{
-		Hash: hash[:],
+		Hash: hash,
 		CAS:  map[string]*client.Identity{},
+		TLS:  m.clusterTLS.ToClient(),
 	}
 	state.CAS[m.ordererOrganization.Name()] = m.ordererOrganization.CA().ToClient()
 	for _, endorsingOrganization := range m.endorsingOrganizations {
 		state.CAS[endorsingOrganization.Name()] = endorsingOrganization.CA().ToClient()
 	}
-	if m.tls != nil {
-		state.TLS = m.tls.ToClient()
-	}
 	return json.NewEncoder(file).Encode(&state)
+}
+
+func (m *Microfab) stateHash() ([]byte, error) {
+	config, err := json.Marshal(m.config)
+	if err != nil {
+		return nil, err
+	}
+	hash := sha256.Sum256(append(config, stateFormat...))
+	return hash[:], nil
 }
 
 func (m *Microfab) loadTLSFromState(state *State) error {
@@ -417,7 +420,7 @@ func (m *Microfab) loadTLSFromState(state *State) error {
 	if err != nil {
 		return err
 	}
-	m.tls = tls
+	m.clusterTLS = tls
 	return nil
 }
 
@@ -455,7 +458,7 @@ func (m *Microfab) loadTLSFromConfig(config TLS) error {
 	if err != nil {
 		return err
 	}
-	m.tls = tls
+	m.clusterTLS = tls
 	return nil
 }
 
@@ -469,7 +472,7 @@ func (m *Microfab) generateTLS() error {
 	if err != nil {
 		return err
 	}
-	m.tls = tls
+	m.clusterTLS = tls
 	return nil
 }
 
@@ -559,21 +562,27 @@ func (m *Microfab) createEndorsingOrganization(config Organization) error {
 	return nil
 }
 
-func (m *Microfab) createAndStartOrderer(organization *organization.Organization, apiPort, operationsPort int) error {
-	logger.Printf("Creating and starting orderer for ordering organization %s ...", organization.Name())
+func (m *Microfab) createOrderer() error {
+	apiPort := m.allocatePort()
+	operationsPort := m.allocatePort()
+	adminPort := m.allocatePort()
+	clusterPort := m.allocatePort()
 	directory := path.Join(m.config.Directory, "orderer")
 	schemeSuffix := ""
 	if m.tls != nil {
 		schemeSuffix = "s"
 	}
 	orderer, err := orderer.New(
-		organization,
+		m.ordererOrganization,
 		directory,
 		int32(m.config.Port),
 		int32(apiPort),
 		fmt.Sprintf("grpc%s://orderer-api.%s", schemeSuffix, m.config.Domain),
 		int32(operationsPort),
 		fmt.Sprintf("http%s://orderer-operations.%s", schemeSuffix, m.config.Domain),
+		int32(adminPort),
+		int32(clusterPort),
+		m.clusterTLS,
 	)
 	if err != nil {
 		return err
@@ -581,16 +590,21 @@ func (m *Microfab) createAndStartOrderer(organization *organization.Organization
 	if m.tls != nil {
 		orderer.EnableTLS(m.tls)
 	}
-	m.Lock()
 	m.orderer = orderer
-	m.Unlock()
-	err = orderer.Start(m.endorsingOrganizations, m.config.Timeout)
+	return nil
+}
+
+func (m *Microfab) startOrderer() error {
+	organization := m.orderer.Organization()
+	logger.Printf("Starting orderer for ordering organization %s ...", organization.Name())
+	err := m.orderer.Start(m.config.Timeout)
 	if err != nil {
 		return err
 	}
-	logger.Printf("Created and started orderer for ordering organization %s", organization.Name())
+	logger.Printf("Started orderer for ordering organization %s", organization.Name())
 	logger.Printf("Orderer API Internal: %s External: %s", m.orderer.APIURL(true), m.orderer.APIURL(false))
 	logger.Printf("Orderer Operations Internal: %s External: %s", m.orderer.OperationsURL(true), m.orderer.OperationsURL(false))
+	logger.Printf("Orderer Admin Internal: %s", m.orderer.AdminURL())
 	return nil
 }
 
@@ -669,7 +683,7 @@ func (m *Microfab) createAndStartPeer(organization *organization.Organization, a
 	m.Lock()
 	m.peers = append(m.peers, peer)
 	m.Unlock()
-	err = peer.Start(m.config.Timeout)
+	err = peer.Start(m.orderer.APIHost(true), m.config.Timeout)
 	if err != nil {
 		return err
 	}
@@ -747,29 +761,6 @@ func (m *Microfab) createChannel(config Channel) (*common.Block, error) {
 	if len(endorsingOrganizations) == 0 {
 		logger.Fatalf("Attempted to create channel %s with no endorsing organizations", config.Name)
 	}
-	for _, endorsingOrganization := range endorsingOrganizations {
-		opts = append(opts, channel.AddMSPID(endorsingOrganization.MSPID()))
-	}
-	channelCreator := endorsingOrganizations[rand.Intn(len(endorsingOrganizations))]
-	ordererConnection, err := orderer.Connect(m.orderer, channelCreator.MSPID(), channelCreator.Admin())
-	if err != nil {
-		return nil, err
-	}
-	defer ordererConnection.Close()
-	err = channel.CreateChannel(ordererConnection, config.Name, opts...)
-	if err != nil {
-		return nil, err
-	}
-	var genesisBlock *common.Block
-	for {
-		genesisBlock, err = blocks.GetGenesisBlock(ordererConnection, config.Name)
-		if err != nil {
-			time.Sleep(100 * time.Millisecond)
-			continue
-		}
-		break
-	}
-	opts = []channel.Option{}
 	for _, peer := range m.peers {
 		found := false
 		for _, organizationName := range config.EndorsingOrganizations {
@@ -782,7 +773,16 @@ func (m *Microfab) createChannel(config Channel) (*common.Block, error) {
 			opts = append(opts, channel.AddAnchorPeer(peer.MSPID(), peer.APIHostname(false), peer.APIPort(true)))
 		}
 	}
-	err = channel.UpdateChannel(ordererConnection, config.Name, opts...)
+	consenter := channel.Consenter{
+		Host: m.orderer.ClusterHostname(),
+		Port: uint32(m.orderer.ClusterPort()),
+		TLS:  m.clusterTLS,
+	}
+	genesisBlock, err := channel.NewGenesisBlock(config.Name, m.ordererOrganization, m.orderer.APIHost(true), consenter, m.tls, endorsingOrganizations, opts...)
+	if err != nil {
+		return nil, err
+	}
+	err = m.orderer.JoinChannel(genesisBlock)
 	if err != nil {
 		return nil, err
 	}
