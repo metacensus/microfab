@@ -30,7 +30,7 @@ var _ = Describe("the orderer package", func() {
 
 		When("called", func() {
 			It("creates a new peer", func() {
-				p, err := orderer.New(testOrganization, testDirectory, 8080, 7051, "grpc://orderer-api.127-0-0-1.nip.io:8080", 8443, "http://orderer-operations.127-0-0-1.nip.io:8080")
+				p, err := orderer.New(testOrganization, testDirectory, 8080, 7051, "grpc://orderer-api.127-0-0-1.nip.io:8080", 8443, "http://orderer-operations.127-0-0-1.nip.io:8080", 7053, 7054, nil)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(p.Organization()).To(Equal(testOrganization))
 				Expect(p.MSPID()).To(Equal(testOrganization.MSPID()))
@@ -48,19 +48,22 @@ var _ = Describe("the orderer package", func() {
 				Expect(p.OperationsPort(true)).To(BeEquivalentTo(8443))
 				Expect(p.OperationsURL(false).String()).To(BeEquivalentTo("http://orderer-operations.127-0-0-1.nip.io:8080"))
 				Expect(p.OperationsURL(true).String()).To(BeEquivalentTo("http://localhost:8443"))
+				Expect(p.AdminURL().String()).To(BeEquivalentTo("http://127.0.0.1:7053"))
+				Expect(p.ClusterHostname()).To(Equal("127.0.0.1"))
+				Expect(p.ClusterPort()).To(BeEquivalentTo(7054))
 			})
 		})
 
 		When("called with an invalid API URL", func() {
 			It("returns an error", func() {
-				_, err := orderer.New(testOrganization, testDirectory, 8080, 7051, "!@£$%^&*()_+", 8443, "http://orderer-operations.127-0-0-1.nip.io:8080")
+				_, err := orderer.New(testOrganization, testDirectory, 8080, 7051, "!@£$%^&*()_+", 8443, "http://orderer-operations.127-0-0-1.nip.io:8080", 7053, 7054, nil)
 				Expect(err).To(HaveOccurred())
 			})
 		})
 
 		When("called with an invalid operations URL", func() {
 			It("returns an error", func() {
-				_, err := orderer.New(testOrganization, testDirectory, 8080, 7051, "grpc://orderer-api.127-0-0-1.nip.io:8080", 8443, "!@£$%^&*()_+")
+				_, err := orderer.New(testOrganization, testDirectory, 8080, 7051, "grpc://orderer-api.127-0-0-1.nip.io:8080", 8443, "!@£$%^&*()_+", 7053, 7054, nil)
 				Expect(err).To(HaveOccurred())
 			})
 		})

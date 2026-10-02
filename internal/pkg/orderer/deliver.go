@@ -23,9 +23,9 @@ func (c *Connection) Deliver(envelope *common.Envelope, callback blocks.DeliverC
 	if err != nil {
 		return err
 	}
-	eof := make(chan bool)
+	eof := make(chan bool, 1)
 	responses := make(chan *orderer.DeliverResponse)
-	errors := make(chan error)
+	errors := make(chan error, 1)
 	go func() {
 		for {
 			response, err := deliverClient.Recv()
@@ -34,6 +34,7 @@ func (c *Connection) Deliver(envelope *common.Envelope, callback blocks.DeliverC
 				return
 			} else if err != nil {
 				errors <- err
+				return
 			} else {
 				responses <- response
 			}

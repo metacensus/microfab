@@ -24,12 +24,17 @@ type Orderer struct {
 	apiURL         *url.URL
 	operationsPort int32
 	operationsURL  *url.URL
+	adminPort      int32
+	clusterPort    int32
+	clusterTLS     *identity.Identity
 	command        *exec.Cmd
 	tls            *identity.Identity
 }
 
+const loopback = "127.0.0.1"
+
 // New creates a new orderer.
-func New(organization *organization.Organization, directory string, microFabPort int32, apiPort int32, apiURL string, operationsPort int32, operationsURL string) (*Orderer, error) {
+func New(organization *organization.Organization, directory string, microFabPort int32, apiPort int32, apiURL string, operationsPort int32, operationsURL string, adminPort int32, clusterPort int32, clusterTLS *identity.Identity) (*Orderer, error) {
 	identityName := fmt.Sprintf("%s Orderer", organization.Name())
 	identity, err := identity.New(identityName, identity.WithOrganizationalUnit("orderer"), identity.UsingSigner(organization.CA()))
 	if err != nil {
@@ -43,7 +48,7 @@ func New(organization *organization.Organization, directory string, microFabPort
 	if err != nil {
 		return nil, err
 	}
-	return &Orderer{organization, organization.MSPID(), identity, directory, microFabPort, apiPort, parsedAPIURL, operationsPort, parsedOperationsURL, nil, nil}, nil
+	return &Orderer{organization, organization.MSPID(), identity, directory, microFabPort, apiPort, parsedAPIURL, operationsPort, parsedOperationsURL, adminPort, clusterPort, clusterTLS, nil, nil}, nil
 }
 
 // TLS gets the TLS identity for this orderer.
@@ -141,4 +146,20 @@ func (o *Orderer) OperationsURL(internal bool) *url.URL {
 	}
 	url, _ := url.Parse(fmt.Sprintf("%s://%s", scheme, o.OperationsHost(false)))
 	return url
+}
+
+// AdminURL returns the URL of the orderer's admin endpoint.
+func (o *Orderer) AdminURL() *url.URL {
+	url, _ := url.Parse(fmt.Sprintf("http://%s:%d", loopback, o.adminPort))
+	return url
+}
+
+// ClusterHostname returns the hostname of the orderer's Raft cluster listener.
+func (o *Orderer) ClusterHostname() string {
+	return loopback
+}
+
+// ClusterPort returns the port of the orderer's Raft cluster listener.
+func (o *Orderer) ClusterPort() int32 {
+	return o.clusterPort
 }
