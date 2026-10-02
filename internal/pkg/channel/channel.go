@@ -7,7 +7,7 @@ package channel
 import (
 	"fmt"
 
-	"github.com/gogo/protobuf/proto"
+	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger-labs/microfab/internal/pkg/config"
 	"github.com/hyperledger-labs/microfab/internal/pkg/identity"
 	"github.com/hyperledger-labs/microfab/internal/pkg/orderer"

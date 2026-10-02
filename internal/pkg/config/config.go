@@ -9,7 +9,7 @@ package config
 import (
 	"fmt"
 
-	"github.com/gogo/protobuf/proto"
+	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger-labs/microfab/internal/pkg/blocks"
 	"github.com/hyperledger-labs/microfab/internal/pkg/configtxlator"
 	"github.com/hyperledger/fabric-protos-go/common"
