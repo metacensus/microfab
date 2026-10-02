@@ -14,7 +14,7 @@ jobs:
     outputs:
       FABRIC_VERSION: ${{ steps.read.outputs.FABRIC_VERSION }}
       FABRIC_CA_VERSION: ${{ steps.read.outputs.FABRIC_CA_VERSION }}
-      FABRIC_PREVIEW_VERSION: ${{ steps.read.outputs.FABRIC_PREVIEW_VERSION }}
+      FABRIC_PREVIOUS_VERSION: ${{ steps.read.outputs.FABRIC_PREVIOUS_VERSION }}
     steps:
       - uses: actions/checkout@v4
       - id: read
@@ -25,12 +25,11 @@ jobs:
     name: Build and test (${{ matrix.fabric }})
     needs: [versions]
     runs-on: ubuntu-latest
-    continue-on-error: ${{ matrix.fabric == needs.versions.outputs.FABRIC_PREVIEW_VERSION }}
-    strategy:
+    strategy: &fabric-versions
       matrix:
         fabric:
           - ${{ needs.versions.outputs.FABRIC_VERSION }}
-          - ${{ needs.versions.outputs.FABRIC_PREVIEW_VERSION }}
+          - ${{ needs.versions.outputs.FABRIC_PREVIOUS_VERSION }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -66,16 +65,17 @@ jobs:
         run: shellcheck $(ls builders/*/bin/* -1 | grep -v ccaas)
 
   fvt:
-    name: Functional Tests
+    name: Functional Tests (${{ matrix.fabric }})
     needs: [versions, build]
     runs-on: ubuntu-latest
+    strategy: *fabric-versions
     steps:
       - uses: actions/checkout@v4
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Setup Fabric
         run: |
-          curl -sSL https://raw.githubusercontent.com/hyperledger/fabric/main/scripts/install-fabric.sh | bash -s -- binary --fabric-version ${{ needs.versions.outputs.FABRIC_VERSION }} --ca-version ${{ needs.versions.outputs.FABRIC_CA_VERSION }}
+          curl -sSL https://raw.githubusercontent.com/hyperledger/fabric/main/scripts/install-fabric.sh | bash -s -- binary --fabric-version ${{ matrix.fabric }} --ca-version ${{ needs.versions.outputs.FABRIC_CA_VERSION }}
 
           # set the path and cfg env var for the rest of the step
           echo "FABRIC_CFG_PATH=$GITHUB_WORKSPACE/config" >> $GITHUB_ENV
@@ -92,7 +92,7 @@ jobs:
           load: true
           tags: dev-microfab
           build-args: |
-            FABRIC_VERSION=${{ needs.versions.outputs.FABRIC_VERSION }}
+            FABRIC_VERSION=${{ matrix.fabric }}
             FABRIC_CA_VERSION=${{ needs.versions.outputs.FABRIC_CA_VERSION }}
 
       - name: Run against image
