@@ -14,7 +14,7 @@ mkdir -p "${CFG}/data"
 
 : ${MICROFAB_IMAGE:="ghcr.io/hyperledger-labs/microfab:latest"}
 
-if docker inspect microfab &>/dev/null; then
+if docker inspect --type container microfab &>/dev/null; then
     echo "Removing existing microfab container:"
     docker kill microfab
 fi

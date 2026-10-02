@@ -25,7 +25,7 @@ import (
 var logger = log.New(os.Stdout, fmt.Sprintf("[%16s] ", "console"), log.LstdFlags)
 
 // Start starts the peer.
-func (p *Peer) Start(timeout time.Duration) error {
+func (p *Peer) Start(ordererAddress string, timeout time.Duration) error {
 	err := p.createDirectories()
 	if err != nil {
 		return err
@@ -38,7 +38,7 @@ func (p *Peer) Start(timeout time.Duration) error {
 	if err != nil {
 		return err
 	}
-	err = p.createConfig(dataDirectory, mspDirectory)
+	err = p.createConfig(dataDirectory, mspDirectory, ordererAddress)
 	if err != nil {
 		return err
 	}
@@ -132,7 +132,7 @@ func (p *Peer) createDirectories() error {
 	return nil
 }
 
-func (p *Peer) createConfig(dataDirectory, mspDirectory string) error {
+func (p *Peer) createConfig(dataDirectory, mspDirectory, ordererAddress string) error {
 	fabricConfigPath, ok := os.LookupEnv("FABRIC_CFG_PATH")
 	if !ok {
 		return fmt.Errorf("FABRIC_CFG_PATH not defined")
@@ -262,7 +262,16 @@ func (p *Peer) createConfig(dataDirectory, mspDirectory string) error {
 		couchDBConfig["password"] = "adminpw"
 
 	}
-	if p.tls != nil {
+	if p.tls == nil {
+		deliveryClient, ok := peer["deliveryclient"].(map[interface{}]interface{})
+		if !ok {
+			return fmt.Errorf("core.yaml missing peer.deliveryclient section")
+		}
+		// The orderer organization's Raft TLS root would make the gateway dial the orderer with TLS; an override without CA certificates dials it in plaintext.
+		deliveryClient["addressOverrides"] = []map[string]string{
+			{"from": ordererAddress, "to": ordererAddress},
+		}
+	} else {
 		tlsDirectory := path.Join(p.directory, "tls")
 		certFile := path.Join(tlsDirectory, "cert.pem")
 		keyFile := path.Join(tlsDirectory, "key.pem")
