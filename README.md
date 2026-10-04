@@ -30,11 +30,7 @@ Depending on your circumstances, familiarity and requirements different tools ma
 
 ## What Fabric version does Microfab use?
 
-The idea is to have branches per release of Fabric.
-
-- `fabric-2.5` is Microfab using the 2.5 LTS for example. (and this is the default branch)
-- `fabric-2.4` uses thes (non-LTS) Fabric 2.4
-- `beta-3.0` will start to use Fabric 3.0 when it starts to become available
+Fabric 3.1.5 by default, also tested on 2.5.16 ([`fabric.env`](./fabric.env)); `make docker FABRIC_VERSION=<version>` builds either.
 
 ## Reference
 
