@@ -106,6 +106,8 @@ var _ = Describe("Integration", func() {
 					err = json.Unmarshal(data, &assets)
 					Expect(err).NotTo(HaveOccurred())
 					Expect(assets).To(HaveLen(6))
+					err = channel.SubmitTransactionViaGateway(peerConnections[0], "channel1", "atb-go", "CreateAsset", "asset7", "blue", "5", "Tom", "100")
+					Expect(err).NotTo(HaveOccurred())
 				})
 			})
 
@@ -300,6 +302,8 @@ var _ = Describe("Integration TLS", func() {
 					err = json.Unmarshal(data, &assets)
 					Expect(err).NotTo(HaveOccurred())
 					Expect(assets).To(HaveLen(6))
+					err = channel.SubmitTransactionViaGateway(peerConnections[0], "channel1", "atb-go", "CreateAsset", "asset7", "blue", "5", "Tom", "100")
+					Expect(err).NotTo(HaveOccurred())
 				})
 			})
 

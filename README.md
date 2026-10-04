@@ -45,7 +45,7 @@ The idea is to have branches per release of Fabric.
 ### What Microfab can't do
 
 - Run in production, please just don't do it. It's development and test only
-- It doesn't yet support RAFT  
+- Run more than one orderer: the ordering service is a single Raft (etcdraft) node
 
 ### Unable to connect errors
 

@@ -75,6 +75,7 @@ var _ = Describe("channel.NewGenesisBlock()", func() {
 			ordererOrganization,
 			"orderer.example.com:7050",
 			consenter,
+			nil,
 			[]*organization.Organization{org1, org2},
 			channel.AddAnchorPeer(org1.MSPID(), "peer0.org1.example.com", 7051),
 			channel.AddAnchorPeer(org2.MSPID(), "peer0.org2.example.com", 8051),
@@ -133,11 +134,24 @@ var _ = Describe("channel.NewGenesisBlock()", func() {
 			mspConfig := getMSPConfig(orgGroup)
 			Expect(mspConfig.Name).To(Equal(org.MSPID()))
 			Expect(mspConfig.RootCerts).To(Equal([][]byte{org.CA().Certificate().Bytes()}))
+			Expect(mspConfig.TlsRootCerts).To(BeEmpty())
 			anchorPeers := &peer.AnchorPeers{}
 			unmarshal(orgGroup.Values["AnchorPeers"].Value, anchorPeers)
 			Expect(anchorPeers.AnchorPeers).To(HaveLen(1))
 			Expect(proto.Equal(anchorPeers.AnchorPeers[0], anchorPeer)).To(BeTrue())
 		}
+	})
+
+	It("gives each endorsing organization the TLS root of the TLS identity, when given one", func() {
+		tlsCA, err := identity.New("TLS CA", identity.WithIsCA(true))
+		Expect(err).NotTo(HaveOccurred())
+		tls, err := identity.New("TLS", identity.UsingSigner(tlsCA))
+		Expect(err).NotTo(HaveOccurred())
+		block, err := channel.NewGenesisBlock("mychannel", ordererOrganization, "orderer.example.com:7050", consenter, tls, []*organization.Organization{org1})
+		Expect(err).NotTo(HaveOccurred())
+		config := getConfig(block)
+		Expect(getMSPConfig(config.ChannelGroup.Groups["Application"].Groups[org1.MSPID()]).TlsRootCerts).To(Equal([][]byte{tlsCA.Certificate().Bytes()}))
+		Expect(getMSPConfig(config.ChannelGroup.Groups["Orderer"].Groups[ordererOrganization.MSPID()]).TlsRootCerts).To(Equal([][]byte{consenter.TLS.CA().Bytes()}))
 	})
 
 	It("sets the channel and orderer capabilities to V2_0 and the application capability to the configured level", func() {
