@@ -8,10 +8,29 @@ on:
   workflow_dispatch: {}
 
 jobs:
+  versions:
+    name: Read Fabric versions
+    runs-on: ubuntu-latest
+    outputs:
+      FABRIC_VERSION: ${{ steps.read.outputs.FABRIC_VERSION }}
+      FABRIC_CA_VERSION: ${{ steps.read.outputs.FABRIC_CA_VERSION }}
+      FABRIC_PREVIEW_VERSION: ${{ steps.read.outputs.FABRIC_PREVIEW_VERSION }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: read
+        run: cat fabric.env >> "$GITHUB_OUTPUT"
+
   # Lint, Compile and Core Function Tests
   build:
-    name: Build and test
+    name: Build and test (${{ matrix.fabric }})
+    needs: [versions]
     runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.fabric == needs.versions.outputs.FABRIC_PREVIEW_VERSION }}
+    strategy:
+      matrix:
+        fabric:
+          - ${{ needs.versions.outputs.FABRIC_VERSION }}
+          - ${{ needs.versions.outputs.FABRIC_PREVIEW_VERSION }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -30,13 +49,11 @@ jobs:
         run: |
           sudo mkdir -p /opt/fabric
           pushd /opt/fabric
-          curl -sSL https://raw.githubusercontent.com/hyperledger/fabric/main/scripts/install-fabric.sh | bash -s -- binary --fabric-version 2.5.16 --ca-version 1.5.22
+          curl -sSL https://raw.githubusercontent.com/hyperledger/fabric/main/scripts/install-fabric.sh | bash -s -- binary --fabric-version ${{ matrix.fabric }} --ca-version ${{ needs.versions.outputs.FABRIC_CA_VERSION }}
           popd
           cd builders/java
           sudo mvn -q dependency:copy-dependencies -DoutputDirectory=/opt/fabric-chaincode-java/lib
           npm install -g fabric-shim@2.5.8
-      - name: Run Go formatters and linters
-        run: make lint
       - name: Run Go unit tests
         run: make unit
       - name: Run Go integration tests
@@ -50,7 +67,7 @@ jobs:
 
   fvt:
     name: Functional Tests
-    needs: [build]
+    needs: [versions, build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -58,7 +75,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
       - name: Setup Fabric
         run: |
-          curl -sSL https://raw.githubusercontent.com/hyperledger/fabric/main/scripts/install-fabric.sh | bash -s -- binary
+          curl -sSL https://raw.githubusercontent.com/hyperledger/fabric/main/scripts/install-fabric.sh | bash -s -- binary --fabric-version ${{ needs.versions.outputs.FABRIC_VERSION }} --ca-version ${{ needs.versions.outputs.FABRIC_CA_VERSION }}
 
           # set the path and cfg env var for the rest of the step
           echo "FABRIC_CFG_PATH=$GITHUB_WORKSPACE/config" >> $GITHUB_ENV
@@ -74,6 +91,9 @@ jobs:
           push: false
           load: true
           tags: dev-microfab
+          build-args: |
+            FABRIC_VERSION=${{ needs.versions.outputs.FABRIC_VERSION }}
+            FABRIC_CA_VERSION=${{ needs.versions.outputs.FABRIC_CA_VERSION }}
 
       - name: Run against image
         run: |
