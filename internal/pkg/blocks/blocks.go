@@ -10,7 +10,6 @@ import (
 	"github.com/hyperledger-labs/microfab/internal/pkg/identity"
 	"github.com/hyperledger-labs/microfab/internal/pkg/protoutil"
 	"github.com/hyperledger-labs/microfab/internal/pkg/txid"
-	"github.com/hyperledger-labs/microfab/internal/pkg/util"
 	"github.com/hyperledger/fabric-protos-go/common"
 	"github.com/hyperledger/fabric-protos-go/orderer"
 )
@@ -23,20 +22,6 @@ type Deliverer interface {
 	MSPID() string
 	Identity() *identity.Identity
 	Deliver(envelope *common.Envelope, callback DeliverCallback) error
-}
-
-// GetConfigBlock gets the latest config block from the specified channel.
-func GetConfigBlock(deliverer Deliverer, channel string) (*common.Block, error) {
-	newestBlock, err := GetNewestBlock(deliverer, channel)
-	if err != nil {
-		return nil, err
-	}
-	metadataBytes := newestBlock.GetMetadata().GetMetadata()[common.BlockMetadataIndex_LAST_CONFIG]
-	metadata := &common.Metadata{}
-	util.UnmarshalOrPanic(metadataBytes, metadata)
-	lastConfig := &common.LastConfig{}
-	util.UnmarshalOrPanic(metadata.Value, lastConfig)
-	return GetSpecificBlock(deliverer, channel, lastConfig.Index)
 }
 
 // GetNewestBlock gets the newest block from the specified channel.
@@ -77,11 +62,6 @@ func GetSpecificBlock(deliverer Deliverer, channel string, number uint64) (*comm
 		Behavior: orderer.SeekInfo_BLOCK_UNTIL_READY,
 	}
 	return getBlock(deliverer, channel, seekInfo)
-}
-
-// GetGenesisBlock gets the genesis block from the specified channel.
-func GetGenesisBlock(deliverer Deliverer, channel string) (*common.Block, error) {
-	return GetSpecificBlock(deliverer, channel, 0)
 }
 
 func buildEnvelope(deliverer Deliverer, channel string, seekInfo *orderer.SeekInfo) *common.Envelope {

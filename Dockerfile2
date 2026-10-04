@@ -3,8 +3,6 @@
 #
 
 ARG GO_VERSION=1.27.1
-ARG FABRIC_VERSION=2.5.16
-ARG FABRIC_CA_VERSION=1.5.22
 ARG COUCHDB_VERSION=3.5
 ARG NODE_VERSION=24.21.0
 ARG GRADLE_VERSION=9.8.0
@@ -93,8 +91,6 @@ COPY --from=builder /tmp/go/src/github.com/hyperledger-labs/microfab/microfabd /
 
 COPY --from=builder --chown=microfab:microfab /tmp/go/src/github.com/hyperledger-labs/microfab/builders/ /home/microfab/builders/
 COPY --from=builder --chown=microfab:microfab /tmp/go/src/github.com/hyperledger/fabric/release/*/builders/ccaas /home/microfab/builders/ccaas
-
-RUN sed -i 's/opt/home/g' /opt/couchdb/etc/local.d/local.ini
 
 ENV FABRIC_CFG_PATH=/etc/hyperledger/fabric
 ENV MICROFAB_HOME=/home/microfab

@@ -90,6 +90,9 @@ jobs:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Read Fabric versions
+        id: versions
+        run: cat fabric.env >> "$GITHUB_OUTPUT"
       - name: Build and push
         id: push
         uses: docker/build-push-action@v6
@@ -100,3 +103,6 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            FABRIC_VERSION=${{ steps.versions.outputs.FABRIC_VERSION }}
+            FABRIC_CA_VERSION=${{ steps.versions.outputs.FABRIC_CA_VERSION }}
