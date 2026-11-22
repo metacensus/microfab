@@ -101,3 +101,13 @@ jobs:
           ./scripts/test-container.sh
         env:
           MICROFAB_IMAGE: dev-microfab
+
+  # The one required check: matrix job names carry Fabric versions, which change.
+  success:
+    name: Pull request success
+    needs: [versions, build, fvt]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+        run: exit 1
